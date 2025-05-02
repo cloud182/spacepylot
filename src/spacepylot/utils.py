@@ -337,7 +337,6 @@ def get_polynorm_SP(array1, array2, chunk_size=15, threshold1=0.,
 
     # proceeds by splitting the data arrays in chunks of chunk_size
     med, std = chunk_stats([array1, array2], chunk_size=chunk_size)
-
     # Selecting where data is supposed to be good
     if threshold1 is None:
         threshold1 = 0.

@@ -218,7 +218,6 @@ class AlignmentBase(object):
         self.prealign_filter = filter_image_for_analysis(image=self.prealign,
                                                          convolve=self.convolve_prealign,
                                                          **self.filter_params)
-
         self.reference_filter = filter_image_for_analysis(image=self.reference,
                                                           convolve=self.convolve_reference,
                                                           **self.filter_params)
@@ -717,7 +716,7 @@ class AlignHomography(object):
         self.model_robust, inliers = ransac((original_xy, transformed_xy), method,
                                             min_samples=min_samples,
                                             residual_threshold=residual_threshold,
-                                            max_trials=max_trials, random_state=random_state, **kwargs)
+                                            max_trials=max_trials, **kwargs) #random_state=random_state,
 
         homographic_solution = np.linalg.inv(self.model_robust.params)
         homographic_solution[1, 0] = -homographic_solution[1, 0]
