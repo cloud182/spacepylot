@@ -12,6 +12,7 @@ __contact__ = "<liz@email"
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from scipy.ndimage import binary_erosion
 
 from astropy.stats import sigma_clip
 
@@ -476,7 +477,7 @@ class AlignmentPlotting:
     """
 
     def __init__(self, prealign, reference, rotation=0, shifts=None,
-                 header=None, v=None, u=None, rotation_fit=None):
+                 header=None, v=None, u=None, rotation_fit=None, safe_mask=None):
         """Initialise the object to show the difference between the prealign and align
         compared to a reference image for a given rotation and translation.
         Rotation is applied first, then translation
@@ -505,7 +506,10 @@ class AlignmentPlotting:
         rotation_fit : dict, optional
             Dictionary parameters showing the rotational solution found using
             the iterative phase cross correlation method. The default is {}.
-
+        safe_mask : 2d-array, optional
+            Mask to select only reliable vectors from non-nan regions in the original 
+            images. The default is None.
+            
         Returns
         -------
         None.
@@ -525,6 +529,7 @@ class AlignmentPlotting:
         self.header = header
         self.v = v
         self.u = u
+        self.safe_mask = safe_mask
         if rotation_fit is None:
             self.rotation_fit = {}
         else:
@@ -600,7 +605,7 @@ class AlignmentPlotting:
     @classmethod
     def from_align_object(cls, align_object, rotation=0, shifts=None,
                           header=None, v=None, u=None,
-                          rotation_fit=None):
+                          rotation_fit=None, safe_mask=None):
         """Initialises the class given an alignment object that contains the same
         attributes needed to plot the alignment, with an alignment solution
 
@@ -628,6 +633,9 @@ class AlignmentPlotting:
         rotation_fit: dict
            Dictionary parameters showing the rotational solution found using
            the iterative phase cross correlation method. The default is None.
+        safe_mask : 2d-array, optional
+            Mask to select only reliable vectors from non-nan regions in the original 
+            images. The default is None.
 
         Returns
         -------
@@ -664,9 +672,13 @@ class AlignmentPlotting:
         except AttributeError:
             if rotation_fit is None:
                 rotation_fit = {}
+        try:
+            safe_mask = align_object.safe_mask
+        except AttributeError:
+            pass        
 
         return cls(data_prealign, data_reference, rotation, shifts,
-                   header, v, u, rotation_fit)
+                   header, v, u, rotation_fit, safe_mask)
 
 
     def _polynorm(self, normalise, **kwargs):
@@ -969,6 +981,11 @@ class AlignmentPlotting:
             u = self.u
         if v is None or u is None:
             raise ValueError('yx vector information has not been supplied')
+
+        # Mask unreliable vectors that were excluded the offset computation.
+        safe_mask = self.safe_mask
+        v[~safe_mask]=np.nan
+        u[~safe_mask]=np.nan
 
         if avg_kwargs is None:
             avg_kwargs = {}

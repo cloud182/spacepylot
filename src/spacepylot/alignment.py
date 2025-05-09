@@ -13,6 +13,7 @@ __contact__ = "<liz@email>"
 
 # Importing modules
 import numpy as np
+from scipy.ndimage import binary_erosion
 
 # Skimage
 from skimage.registration import phase_cross_correlation, optical_flow_tvl1
@@ -26,7 +27,7 @@ import copy as cp
 from . import alignment_utilities as au
 from .alignment_utilities import (get_shifts_from_homography_matrix,
                                   get_rotation_from_homography_matrix)
-from .utils import VerbosePrints, filter_image_for_analysis, _split, default_kw_opticalflow
+from .utils import VerbosePrints, filter_image_for_analysis, _split, default_kw_opticalflow, _remove_image_border
 from .params import pcc_params
 
 
@@ -205,15 +206,25 @@ class AlignmentBase(object):
 
         self.prealign = prealign
         self.reference = reference
-
+        
+        if self.prealign.shape != self.reference.shape:
+            raise ValueError("`prealign` and `reference` must have the same shape.")
+        
+        mode = getattr(self, "mode", "default")
+        if mode == "keep_nans":
+            self.reference[np.isnan(self.prealign)] = np.nan
+        
         self.convolve_prealign = convolve_prealign
         self.convolve_reference = convolve_reference
 
         if filter_params is None:
-            self.filter_params = pcc_params
+            self.filter_params = pcc_params.copy()
             self.print.default_filter_params()
         else:
             self.filter_params = filter_params
+
+        if mode == "keep_nans":
+            self.filter_params['replace_nans']=False
 
         self.prealign_filter = filter_image_for_analysis(image=self.prealign,
                                                          convolve=self.convolve_prealign,
@@ -222,6 +233,13 @@ class AlignmentBase(object):
                                                           convolve=self.convolve_reference,
                                                           **self.filter_params)
 
+        # Prepare mask for nans in the original. This is used to mask vectors after
+        # executing optical flow, because optical flow cannot handle nans
+        reliable_mask = ~np.isnan(self.prealign)
+        # Shrink valid region to exclude unreliable vectors close to the edges
+        safe_mask = binary_erosion(reliable_mask, iterations=40)
+        self.safe_mask = _remove_image_border(safe_mask, 25)
+        
         # This is the euclid homography matrix. It is another way
         # of storing the translation and rotation. Useful since if
         # you apply a rotation and then a translation, it will accurately track
@@ -475,6 +493,10 @@ class AlignmentCrossCorrelate(AlignmentBase):
     to work out the offset between two images.
     """
 
+    def __init__(self, *args, **kwargs):
+        self.mode = "keep_nans"
+        super().__init__(*args, **kwargs)
+        
     def fft_phase_correlation(self, prealign, reference, resolution=1000,
                               **kwargs):
         """
@@ -515,6 +537,8 @@ class AlignmentCrossCorrelate(AlignmentBase):
         shifts, error, phasediff = phase_cross_correlation(
             reference_image=reference,
             moving_image=prealign,
+            reference_mask=~np.isnan(reference),
+            moving_mask=~np.isnan(prealign),
             upsample_factor=upsample_factor, **kwargs
             )
         return shifts
@@ -807,12 +831,26 @@ class AlignOpticalFlow(AlignmentBase, AlignHomography):
 
         y_sparse, x_sparse, v_sparse, u_sparse = \
             au.get_sparse_vector_grid(self.v, self.u, num_per_dimension)
+        
+        x_sparse_flat = x_sparse.flatten()
+        y_sparse_flat = y_sparse.flatten()
+        u_sparse_flat = u_sparse.flatten()
+        v_sparse_flat = v_sparse.flatten()
+        
+        # Create vector mask to filter out unreliable vectors from nan regions
+        valid = self.safe_mask[y_sparse_flat, x_sparse_flat]
+
+        # Apply mask to keep only reliable vectors
+        x_sparse = x_sparse_flat[valid]
+        y_sparse = y_sparse_flat[valid]
+        u_sparse = u_sparse_flat[valid]
+        v_sparse = v_sparse_flat[valid]
 
         y_sparse_pre = y_sparse + v_sparse
         x_sparse_pre = x_sparse + u_sparse
 
-        xy_stacked = au.column_stack_2d(x_sparse, y_sparse)
-        xy_stacked_pre = au.column_stack_2d(x_sparse_pre, y_sparse_pre)
+        xy_stacked = np.column_stack((x_sparse, y_sparse))
+        xy_stacked_pre = np.column_stack((x_sparse_pre, y_sparse_pre))
 
         return xy_stacked, xy_stacked_pre
 

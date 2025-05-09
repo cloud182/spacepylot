@@ -14,12 +14,14 @@ from skimage.filters import difference_of_gaussians
 pcc_params = {
     'histogram_equalisation': True,
     'remove_boundary_pixels': 25,
+    'replace_nans': True,
     'hpf': difference_of_gaussians,
     'hpf_kwargs': {
         'low_sigma': 0.9,
         'high_sigma': 0.9 * 8
     },
 }
+
 
 if __name__ == "__main__":
     pass
