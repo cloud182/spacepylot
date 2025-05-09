@@ -462,8 +462,8 @@ def filtermed_image(data, border=0, filter_size=2):
 
 
 def filter_image_for_analysis(image, histogram_equalisation=False,
-                              remove_boundary_pixels=25, convolve=None,
-                              hpf=None, hpf_kwargs=None):
+                              remove_boundary_pixels=25, replace_nans=True, 
+                              convolve=None, hpf=None, hpf_kwargs=None):
     """
     The function that controls how the prealign and reference image are
     filtered before running the alignment
@@ -479,6 +479,8 @@ def filter_image_for_analysis(image, histogram_equalisation=False,
     remove_boundary_pixels : int, optional
         Removes pixels around the image if there are bad pixels at the
         detector edge. The default is 25.
+    replace_nans : Bool, optional
+        If true, replaces non finite values with zeros. The default is True.
     convolve : int or None, optional
         If a number, it will convolve the image. The number refers to
         the sigma of the folding Gaussian to convolve by in units of pixels
@@ -498,13 +500,15 @@ def filter_image_for_analysis(image, histogram_equalisation=False,
     """
 
     image = _remove_image_border(image, remove_boundary_pixels)
-    image = _remove_nonvalid_numbers(image)
+    if replace_nans:
+        image = _remove_nonvalid_numbers(image)
     if convolve is not None:
         image = au.convolve_image(image, convolve)
 
     # This helps to match up the intensities
     if histogram_equalisation:
-        image = exposure.equalize_hist(image)
+        mask = ~np.isnan(image)
+        image = exposure.equalize_hist(image, mask=mask)
 
     # Remove some frequencies to make alignment more robust vs noise
     if hpf is not None:
