@@ -464,7 +464,6 @@ class AlignmentBase(object):
                                                                **self.filter_params)
         return transformed_image_filtered
 
-
 class AlignmentCrossCorrelate(AlignmentBase):
     """
     Finds the translational offset between the reference and prealign images

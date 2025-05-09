@@ -13,10 +13,13 @@ __contact__ = "<liz@email"
 import numpy as np
 import copy as cp
 from functools import lru_cache, wraps
+import matplotlib.pyplot as plt
+
 
 # ODR import
 from scipy.odr import ODR, Model, RealData
 import scipy.ndimage as ndi
+from scipy.ndimage import binary_dilation
 
 # Skimage
 from skimage import exposure
@@ -27,6 +30,8 @@ from astropy.stats import mad_std, sigma_clip
 # Internal package calls
 from .params import pcc_params
 from . import alignment_utilities as au
+
+from itertools import product
 
 default_kw_opticalflow = {'attachment': 10, 'tightness': 0.3, 'num_warp': 15,
                           'num_iter': 10, 'tol': 0.0001, 'prefilter': False}
@@ -508,6 +513,117 @@ def filter_image_for_analysis(image, histogram_equalisation=False,
         image = hpf(image, **hpf_kwargs)
 
     return image
+
+def rmse_test(data, reference, header, offset, rot, **kwargs):
+    """
+    Performs a chi2 test to see if the offset and rotation are correct.
+
+    Parameters
+    ----------
+    offset : 2-array
+        The yx coordinate to translate the image.
+    rot : float
+        The new rotation. Units are in degrees, and a positive value rotates
+        counter-clockwise.
+
+    Returns
+    -------
+    None
+    """
+
+    delta_off = kwargs.get('delta_off', 2)
+    delta_rot = kwargs.get('delta_rot', 1)
+    num_points = kwargs.get('num_points', 11)
+    dilation_size = kwargs.get('dilation_size', 3)
+
+    # create the ranges for rotation and translation
+    test_yx = np.linspace(-delta_off, delta_off, num_points)
+    test_rot = np.linspace(-delta_rot, delta_rot, num_points)
+
+    # make sure that zero is always in the center of the grid
+    if num_points % 2 == 0:
+        raise ValueError("num_points deve essere dispari per garantire che zero sia al centro.")
+
+    # Initialize the grid of RMSE values
+    rmse_cube = np.zeros((num_points, num_points, num_points))
+
+    # Look for zeros and nans in the data image and increase it slightly
+    mask = (data == 0) | (np.isnan(data))
+    mask = binary_dilation(mask, structure=np.ones((dilation_size, dilation_size)))
+
+    # Iterates on all the combinations of translation and rotation
+    for idx, (dy, dx, dr) in enumerate(product(test_yx, test_yx, test_rot)):
+        i, j, k = np.unravel_index(idx, (num_points, num_points, num_points))
+        new_offset = offset + np.array([dy, dx])
+        new_rot = rot + dr
+        transformed_image = au.transform_image_wcs(data, header, new_rot, new_offset)
+
+        # applies the mask to the images before comuputing the RMSE
+        valid_pixels = ~mask
+        rmse = np.sqrt(np.nanmean((transformed_image[valid_pixels] - reference[valid_pixels]) ** 2))
+        rmse_cube[i, j, k] = rmse
+
+    # isolate the RMSE cube projections for 2 variables
+
+    rmse_proj_yx = np.squeeze(rmse_cube[:, :, test_rot == 0])  # (y, x)
+    rmse_proj_yr = np.squeeze(rmse_cube[:, test_yx == 0, :])   # (y) e rot
+    rmse_proj_xr = np.squeeze(rmse_cube[test_yx == 0, :, :])   # (x) e rot
+
+    # Plots
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    axes = axes.flatten()
+
+    ax = axes[0]
+    im = ax.imshow(rmse_proj_yx, origin='lower', extent=[-delta_off, delta_off, -delta_off, delta_off], cmap='viridis')
+    ax.set_xlabel('x offset')
+    ax.set_ylabel('y offset')
+    ax.set_title('RMSE Projection (y, x)')
+    fig.colorbar(im, ax=ax)
+
+    ax = axes[1]
+    im = ax.imshow(rmse_proj_yr, origin='lower', extent=[-delta_rot, delta_rot, -delta_off, delta_off], cmap='viridis')
+    ax.set_xlabel('rotation offset')
+    ax.set_ylabel('y offset')
+    ax.set_title('RMSE Projection (y, rotation)')
+    fig.colorbar(im, ax=ax)
+
+    ax = axes[2]
+    im = ax.imshow(rmse_proj_xr, origin='lower', extent=[-delta_rot, delta_rot, -delta_off, delta_off], cmap='viridis')
+    ax.set_xlabel('rotation offset')
+    ax.set_ylabel('x offset')
+    ax.set_title('RMSE Projection (x, rotation)')
+    fig.colorbar(im, ax=ax)
+
+    # isolate the RMSE cube projections for single variables
+
+    rmse_proj_x = np.squeeze(rmse_cube[test_yx==0, :, test_rot==0] ) # Proiezione su traslazione (y, x)
+    rmse_proj_y = np.squeeze(rmse_cube[:, test_yx==0, test_rot==0] ) # Proiezione su traslazione (y) e rotazione
+    rmse_proj_r = np.squeeze(rmse_cube[test_yx==0, test_yx==0, :] ) # Proiezione su traslazione (x) e rotazione
+
+
+    ax = axes[3]
+    im = ax.plot(test_yx,  rmse_proj_x)
+    ax.set_xlabel('x offset')
+    ax.set_ylabel('RMSE x')
+
+    ax = axes[4]
+    im = ax.plot(test_yx,  rmse_proj_y)
+    ax.set_xlabel('y offset')
+    ax.set_ylabel('RMSE y')
+
+    ax = axes[5]
+    im = ax.plot(test_rot, rmse_proj_r)
+    ax.set_xlabel('rotation offset')
+    ax.set_ylabel('RMSE rot')
+
+    plt.tight_layout()
+    filename = kwargs.get('filename', None)
+    if filename is not None:
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
+
 
 if __name__ == "__main__":
     pass
